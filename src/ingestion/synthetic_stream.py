@@ -1,5 +1,7 @@
-from datetime import date, timedelta
-import random
+import csv
+from pathlib import Path
+from datetime import datetime
+from collections import defaultdict
 
 from .schema import (
     AdvertisingData,
@@ -9,330 +11,286 @@ from .schema import (
 )
 
 
-# ---------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------
+# =========================================================
+# DATA LOCATION
+# =========================================================
 
-RANDOM_SEED = 42
-DAYS = 14
-
-random.seed(RANDOM_SEED)
-
-
-# ---------------------------------------------------------
-# Products
-# ---------------------------------------------------------
-
-PRODUCTS = [
-    {
-        "sku": "SKU001",
-        "product_name": "Smart Bottle",
-        "selling_price": 1500.0,
-        "cost_price": 675.0,
-        "initial_inventory": 900,
-    },
-    {
-        "sku": "SKU002",
-        "product_name": "Wireless Earbuds",
-        "selling_price": 3000.0,
-        "cost_price": 1200.0,
-        "initial_inventory": 1200,
-    },
-    {
-        "sku": "SKU003",
-        "product_name": "Travel Backpack",
-        "selling_price": 2500.0,
-        "cost_price": 2200.0,
-        "initial_inventory": 500,
-    },
-    {
-        "sku": "SKU004",
-        "product_name": "Fitness Band",
-        "selling_price": 2000.0,
-        "cost_price": 900.0,
-        "initial_inventory": 700,
-    },
-]
+DATA_DIR = (
+    Path(__file__).resolve().parents[2]
+    / "data"
+    / "raw"
+)
 
 
-CAMPAIGNS = [
-    {
-        "campaign_id": "C001",
-        "platform": "Meta",
-        "sku": "SKU001",
-        "base_spend": 9000,
-        "ctr": 0.045,
-        "conversion_rate": 0.055,
-    },
-    {
-        "campaign_id": "C002",
-        "platform": "Google",
-        "sku": "SKU002",
-        "base_spend": 12000,
-        "ctr": 0.060,
-        "conversion_rate": 0.070,
-    },
-    {
-        "campaign_id": "C003",
-        "platform": "TikTok",
-        "sku": "SKU003",
-        "base_spend": 10000,
-        "ctr": 0.050,
-        "conversion_rate": 0.045,
-    },
-    {
-        "campaign_id": "C004",
-        "platform": "Meta",
-        "sku": "SKU004",
-        "base_spend": 8000,
-        "ctr": 0.040,
-        "conversion_rate": 0.050,
-    },
-]
+# =========================================================
+# HELPERS
+# =========================================================
+
+def parse_date(value):
+    return datetime.strptime(
+        value,
+        "%Y-%m-%d"
+    ).date()
 
 
-# ---------------------------------------------------------
-# Product generation
-# ---------------------------------------------------------
+def read_csv(filename):
+    path = DATA_DIR / filename
 
-def generate_products():
-    products = []
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Data file not found: {path}"
+        )
 
-    for product in PRODUCTS:
-        products.append(
-            ProductData(
-                sku=product["sku"],
-                product_name=product["product_name"],
-                selling_price=product["selling_price"],
-                cost_price=product["cost_price"],
+    with open(
+        path,
+        "r",
+        encoding="utf-8-sig",
+        newline=""
+    ) as file:
+
+        return list(
+            csv.DictReader(file)
+        )
+
+
+# =========================================================
+# LOAD ADVERTISING DATA
+# =========================================================
+
+def load_advertising():
+    rows = read_csv(
+        "advertising.csv"
+    )
+
+    # The source contains multiple platform rows
+    # for the same campaign/date/SKU.
+    #
+    # Athena's core engine works at campaign level,
+    # so aggregate those rows here.
+
+    aggregated = defaultdict(
+        lambda: {
+            "platforms": set(),
+            "spend": 0.0,
+            "impressions": 0,
+            "clicks": 0,
+            "conversions": 0,
+        }
+    )
+
+    for row in rows:
+
+        key = (
+            row["campaign_id"],
+            row["sku"],
+            parse_date(row["date"]),
+        )
+
+        item = aggregated[key]
+
+        item["platforms"].add(
+            row["platform"]
+        )
+
+        item["spend"] += float(
+            row["spend"]
+        )
+
+        item["impressions"] += int(
+            row["impressions"]
+        )
+
+        item["clicks"] += int(
+            row["clicks"]
+        )
+
+        item["conversions"] += int(
+            row["conversions"]
+        )
+
+    result = []
+
+    for (
+        campaign_id,
+        sku,
+        date
+    ), values in aggregated.items():
+
+        platforms = sorted(
+            values["platforms"]
+        )
+
+        platform = (
+            platforms[0]
+            if len(platforms) == 1
+            else "Multi-platform"
+        )
+
+        result.append(
+            AdvertisingData(
+                campaign_id=campaign_id,
+                platform=platform,
+                sku=sku,
+                date=date,
+
+                spend=round(
+                    values["spend"],
+                    2
+                ),
+
+                impressions=values[
+                    "impressions"
+                ],
+
+                clicks=values[
+                    "clicks"
+                ],
+
+                conversions=values[
+                    "conversions"
+                ],
             )
         )
 
-    return products
+    return result
 
 
-# ---------------------------------------------------------
-# Inventory generation
-# ---------------------------------------------------------
+# =========================================================
+# LOAD SALES DATA
+# =========================================================
 
-def generate_inventory():
-    inventory = []
+def load_sales():
+    rows = read_csv(
+        "sales.csv"
+    )
 
-    for product in PRODUCTS:
-        inventory.append(
-            InventoryData(
-                sku=product["sku"],
-                available_units=product["initial_inventory"],
-            )
-        )
+    result = []
 
-    return inventory
+    for row in rows:
 
+        # Only use completed/paid orders
+        if row["order_status"] != "COMPLETED":
+            continue
 
-# ---------------------------------------------------------
-# Advertising data generation
-# ---------------------------------------------------------
+        if row["payment_status"] != "PAID":
+            continue
 
-def generate_advertising_data(days=DAYS):
-    advertising_data = []
-
-    start_date = date.today() - timedelta(days=days - 1)
-
-    for day_number in range(days):
-
-        current_date = start_date + timedelta(days=day_number)
-
-        for campaign in CAMPAIGNS:
-
-            # Normal daily variation
-            spend = campaign["base_spend"] * random.uniform(0.90, 1.10)
-
-            ctr = campaign["ctr"] * random.uniform(0.90, 1.10)
-
-            conversion_rate = (
-                campaign["conversion_rate"]
-                * random.uniform(0.90, 1.10)
-            )
-
-            # -------------------------------------------------
-            # Scenario 1:
-            # C003 experiences a performance crash
-            # during the final 4 days.
-            # -------------------------------------------------
-
-            if (
-                campaign["campaign_id"] == "C003"
-                and day_number >= days - 4
-            ):
-                ctr *= 0.80
-                conversion_rate *= 0.65
-
-            # -------------------------------------------------
-            # Calculate impressions / clicks / conversions
-            # -------------------------------------------------
-
-            estimated_cpc = random.uniform(8, 14)
-
-            clicks = max(
-                1,
-                int(spend / estimated_cpc)
-            )
-
-            impressions = max(
-                clicks,
-                int(clicks / ctr)
-            )
-
-            conversions = max(
-                0,
-                int(clicks * conversion_rate)
-            )
-
-            advertising_data.append(
-                AdvertisingData(
-                    campaign_id=campaign["campaign_id"],
-                    platform=campaign["platform"],
-                    sku=campaign["sku"],
-                    date=current_date,
-                    spend=round(spend, 2),
-                    impressions=impressions,
-                    clicks=clicks,
-                    conversions=conversions,
-                )
-            )
-
-    return advertising_data
-
-
-# ---------------------------------------------------------
-# Sales data generation
-# ---------------------------------------------------------
-
-def generate_sales_data(advertising_data, products):
-    sales_data = []
-
-    product_lookup = {
-        product.sku: product
-        for product in products
-    }
-
-    order_counter = 1
-
-    for ad in advertising_data:
-
-        product = product_lookup[ad.sku]
-
-        # Base conversion from advertising
-        units_sold = ad.conversions
-
-        # Small amount of organic / additional sales
-        organic_sales = random.randint(2, 10)
-
-        units_sold += organic_sales
-
-        revenue = units_sold * product.selling_price
-
-        sales_data.append(
+        result.append(
             SalesData(
-                order_id=f"ORD{order_counter:05d}",
-                sku=ad.sku,
-                date=ad.date,
-                units_sold=units_sold,
-                revenue=round(revenue, 2),
+                order_id=row["order_id"],
+                sku=row["sku"],
+                date=parse_date(
+                    row["date"]
+                ),
+
+                units_sold=int(
+                    row["quantity"]
+                ),
+
+                revenue=float(
+                    row["net_revenue"]
+                ),
             )
         )
 
-        order_counter += 1
-
-    return sales_data
+    return result
 
 
-# ---------------------------------------------------------
-# Inventory calculation
-# ---------------------------------------------------------
+# =========================================================
+# LOAD PRODUCT DATA
+# =========================================================
 
-def calculate_inventory(products, sales_data):
-    inventory = []
+def load_products():
+    rows = read_csv(
+        "products.csv"
+    )
 
-    total_sales = {}
+    result = []
 
-    for sale in sales_data:
-        total_sales[sale.sku] = (
-            total_sales.get(sale.sku, 0)
-            + sale.units_sold
-        )
+    for row in rows:
 
-    for product in products:
+        result.append(
+            ProductData(
+                sku=row["sku"],
+                product_name=row[
+                    "product_name"
+                ],
 
-        remaining_inventory = (
-            PRODUCTS[
-                next(
-                    i
-                    for i, p in enumerate(PRODUCTS)
-                    if p["sku"] == product.sku
-                )
-            ]["initial_inventory"]
-            - total_sales.get(product.sku, 0)
-        )
+                selling_price=float(
+                    row["selling_price"]
+                ),
 
-        # Intentionally create an inventory-risk scenario
-        if product.sku == "SKU003":
-            remaining_inventory = min(
-                remaining_inventory,
-                70
+                cost_price=float(
+                    row["cost"]
+                ),
             )
-
-        remaining_inventory = max(
-            0,
-            remaining_inventory
         )
 
-        inventory.append(
+    return result
+
+
+# =========================================================
+# LOAD INVENTORY DATA
+# =========================================================
+
+def load_inventory():
+    rows = read_csv(
+        "inventory.csv"
+    )
+
+    result = []
+
+    for row in rows:
+
+        result.append(
             InventoryData(
-                sku=product.sku,
-                available_units=remaining_inventory,
+                sku=row["sku"],
+
+                available_units=int(
+                    row["available_inventory"]
+                ),
             )
         )
 
-    return inventory
+    return result
 
 
-# ---------------------------------------------------------
-# Main synthetic stream
-# ---------------------------------------------------------
+# =========================================================
+# MAIN ATHENA DATASET
+# =========================================================
 
-def generate_dataset(days=DAYS):
-    products = generate_products()
+def generate_dataset():
+    """
+    Load the real Athena dataset from CSV files.
 
-    advertising_data = generate_advertising_data(days)
+    The function name is intentionally preserved so that
+    the existing analytics, diagnostic, optimizer,
+    execution, feedback and reasoning layers continue
+    working without architectural changes.
+    """
 
-    sales_data = generate_sales_data(
-        advertising_data,
-        products
-    )
-
-    inventory = calculate_inventory(
-        products,
-        sales_data
-    )
-
-    return {
-        "advertising": advertising_data,
-        "sales": sales_data,
-        "products": products,
-        "inventory": inventory,
+    dataset = {
+        "advertising": load_advertising(),
+        "sales": load_sales(),
+        "products": load_products(),
+        "inventory": load_inventory(),
     }
 
+    return dataset
 
-# ---------------------------------------------------------
-# Quick test
-# ---------------------------------------------------------
+
+# =========================================================
+# TEST DATA LOADER
+# =========================================================
 
 if __name__ == "__main__":
 
     dataset = generate_dataset()
 
-    print("\n=== ATHENA SYNTHETIC DATA ===\n")
+    print()
+    print("=" * 70)
+    print("             ATHENA REAL DATA LOADER")
+    print("=" * 70)
 
     print(
         f"Advertising records: "
@@ -345,7 +303,7 @@ if __name__ == "__main__":
     )
 
     print(
-        f"Products: "
+        f"Product records: "
         f"{len(dataset['products'])}"
     )
 
@@ -354,15 +312,18 @@ if __name__ == "__main__":
         f"{len(dataset['inventory'])}"
     )
 
-    print("\n=== SAMPLE ADVERTISING RECORD ===\n")
+    print()
+    print("Sample advertising record:")
     print(dataset["advertising"][0])
 
-    print("\n=== PRODUCTS ===\n")
+    print()
+    print("Sample sales record:")
+    print(dataset["sales"][0])
 
-    for product in dataset["products"]:
-        print(product)
+    print()
+    print("Sample product record:")
+    print(dataset["products"][0])
 
-    print("\n=== INVENTORY ===\n")
-
-    for item in dataset["inventory"]:
-        print(item)
+    print()
+    print("Sample inventory record:")
+    print(dataset["inventory"][0])

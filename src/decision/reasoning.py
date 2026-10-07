@@ -250,6 +250,7 @@ def generate_all_reasoning(
 
     feedback_lookup = {
         result["campaign_id"]: result
+              
         for result in feedback_results
     }
 
