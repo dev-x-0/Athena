@@ -13,24 +13,68 @@ import {
 } from './data/demo';
 import './index.css';
 import logo from './assets/athena-logo.png';
+import introVideo from './assets/athena-intro.mov';
 
-function Mark(){return <div className="relative h-10 w-10 rounded-xl border border-[#718198]/40 bg-[#0a1624] flex items-center justify-center overflow-hidden"><img src={logo} alt="Athena emblem" className="h-full w-full object-cover object-center opacity-95"/><div className="absolute inset-0 bg-[#07101b]/20"/></div>}
-function Intro({onEnter}){return <motion.div initial={{opacity:1}} animate={{opacity:0}} transition={{duration:.9,delay:3.5,ease:'easeInOut'}} onAnimationComplete={onEnter} className="fixed inset-0 z-50 bg-[#050b13] flex items-center justify-center overflow-hidden">
-  <div className="absolute inset-0 intro-grain"/>
-  <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(116,137,158,.14),transparent_45%)]"/>
-  <div className="relative w-[min(86vw,720px)] text-center">
-    <motion.div initial={{opacity:0,scale:.94,filter:'blur(5px)'}} animate={{opacity:1,scale:1,filter:'blur(0px)'}} transition={{duration:1.15,ease:'easeOut'}} className="relative mx-auto w-[min(78vw,560px)] aspect-[960/835] overflow-hidden">
-      <motion.img src={logo} alt="Athena emblem" initial={{clipPath:'inset(0 100% 0 0)',scale:1.03}} animate={{clipPath:'inset(0 0% 0 0)',scale:1}} transition={{duration:1.8,delay:.15,ease:'easeInOut'}} className="absolute inset-0 h-full w-full object-contain"/>
-      <motion.div initial={{x:'-120%',opacity:0}} animate={{x:'120%',opacity:[0,.75,0]}} transition={{duration:1.6,delay:.35,ease:'easeInOut'}} className="absolute top-0 bottom-0 w-16 bg-gradient-to-r from-transparent via-white/15 to-transparent blur-xl"/>
-    </motion.div>
-    <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} transition={{delay:1.75,duration:.65,ease:'easeOut'}}>
-      <div className="text-4xl md:text-5xl tracking-[.42em] pl-[.42em] font-medium text-[#eef2f7]">ATHENA</div>
-      <div className="mt-3 text-[10px] md:text-[11px] tracking-[.34em] uppercase text-[#8b9aad]">Autonomous D2C Intelligence</div>
-    </motion.div>
-    <motion.div initial={{scaleX:0,opacity:0}} animate={{scaleX:1,opacity:.5}} transition={{delay:2.15,duration:.65}} className="mx-auto mt-6 h-px w-28 origin-center bg-[#d8e0ea]"/>
-  </div>
-</motion.div>}
-function Sidebar({page,setPage}){let items=[['Overview',LayoutDashboard],['Campaigns',Megaphone],['Products',Package],['Inventory',Boxes],['Creatives',Sparkles],['Insights',BrainCircuit]];return <aside className="w-60 shrink-0 border-r border-[#1a2a3b] bg-[#060d16] p-5 hidden md:flex flex-col"><div className="flex items-center gap-3 mb-10"><Mark/><div><div className="font-semibold tracking-[.18em]">ATHENA</div><div className="text-[9px] text-[#718198] tracking-[.16em] uppercase">D2C Intelligence</div></div></div><nav className="space-y-1">{items.map(([name,Icon])=><button key={name} onClick={()=>setPage(name)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition ${page===name?'bg-[#102033] text-[#e9eff6]':'text-[#718198] hover:text-[#cbd5e1] hover:bg-[#0b1724]'}`}><Icon size={16}/>{name}</button>)}</nav><div className="mt-auto"><div className="line mb-4"/><button className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-[#718198]"><Settings size={16}/>Settings</button></div></aside>}
+function Mark(){
+    return (
+        <div className="relative h-10 w-10 rounded-xl border border-[#718198]/40 bg-[#0a1624] flex items-center justify-center overflow-hidden">
+            <img
+                src={logo}
+                alt="Athena emblem"
+                className="h-full w-full object-cover object-center opacity-95"
+            />
+        </div>
+    );
+}
+
+function Intro({onEnter}){
+    const [ended, setEnded] = useState(false);
+
+    useEffect(() => {
+        document.body.style.overflow = 'hidden';
+        return () => { document.body.style.overflow = ''; };
+    }, []);
+
+    const finish = () => {
+        if (!ended) setEnded(true);
+    };
+
+    return (
+        <motion.div
+            initial={{opacity: 1}}
+            animate={{opacity: ended ? 0 : 1}}
+            transition={{duration: 0.85, ease: 'easeInOut'}}
+            onAnimationComplete={() => {
+                if (ended) onEnter();
+            }}
+            className="fixed inset-0 z-[100] bg-[#050b13] overflow-hidden"
+            aria-label="Athena introduction"
+        >
+            <video
+                className="absolute inset-0 h-full w-full object-contain bg-[#050b13]"
+                src={introVideo}
+                autoPlay
+                muted
+                playsInline
+                preload="auto"
+                onEnded={finish}
+                onError={finish}
+            />
+
+            <div className="absolute inset-0 pointer-events-none bg-[#050b13]/[0.02]" />
+
+            {ended && (
+                <motion.div
+                    initial={{opacity: 0}}
+                    animate={{opacity: 1}}
+                    transition={{duration: 0.2}}
+                    className="absolute inset-0 bg-[#050b13]"
+                />
+            )}
+        </motion.div>
+    );
+}
+function Sidebar({page,setPage}){let items=[['Overview',LayoutDashboard],['Campaigns',Megaphone],['Products',Package],['Inventory',Boxes],['Creatives',Sparkles],['Insights',BrainCircuit]];return <aside className="w-60 shrink-0 border-r border-[#1a2a3b] bg-[#060d16] p-5 hidden md:flex flex-col"><div className="flex items-center gap-3 mb-10"><Mark/><div><div className="font-semibold tracking-[.18em]">ATHENA</div></div></div><nav className="space-y-1">{items.map(([name,Icon])=><button key={name} onClick={()=>setPage(name)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition ${page===name?'bg-[#102033] text-[#e9eff6]':'text-[#718198] hover:text-[#cbd5e1] hover:bg-[#0b1724]'}`}><Icon size={16}/>{name}</button>)}</nav><div className="mt-auto"><div className="line mb-4"/><button className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-[#718198]"><Settings size={16}/>Settings</button></div></aside>}
 function Topbar(){
 
     const syncTime = new Date().toLocaleTimeString(
@@ -365,8 +409,8 @@ function App(){
                         ATHENA
                     </div>
 
-                    <div className="mt-3 text-sm text-[#718198]">
-                        Connecting to intelligence engine...
+                    <div className="mt-3 text-[10px] uppercase tracking-[.28em] text-[#718198]">
+                        Initializing
                     </div>
 
                 </div>
